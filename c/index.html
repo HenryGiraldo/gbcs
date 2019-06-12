@@ -812,6 +812,8 @@ function getZigbeeProfile(profileId) {
       },
       10: {
         name: "Report Attributes",
+        getSummary: getReadAttributesSummary,
+        getDetails: getReportAttributesDetails,
       },
       11: {
         name: "Default Response",
@@ -838,6 +840,20 @@ function getZigbeeProfile(profileId) {
         },
         commands: {},
         responses: {},
+      },
+      0x0019: {
+        name: "OTA Upgrade",
+        attributes: {},
+        commands: {
+          1: [ "Query Next Image Request", getQueryNextImageRequestDetails ],
+          3: [ "Image Block Request", getImageBlockRequestDetails ],
+          6: [ "Upgrade End Request", getUpgradeEndRequestDetails ],
+        },
+        responses: {
+          2: [ "Query Next Image Response", getQueryNextImageResponseDetails ],
+          5: [ "Image Block Response", getImageBlockResponseDetails ],
+          7: [ "Upgrade End Response", getUpgradeEndResponseDetails ],
+        },
       },
       0x0700: {
         name: "Price",
@@ -908,12 +924,15 @@ function getZigbeeProfile(profileId) {
           0x0B13: "Uncontrolled Flow Divisor",
           0x0B14: "Flow Stabilisation Period",
           0x0B15: "Flow Measurement Period",
+          0x0C01: "Current Day Alternative Consumption Delivered",
+          0xFFFE: "Attribute Reporting Status",
         },
         commands: {
           1: [ "Request Mirror Response", getRequestMirrorResponseDetails ],
           6: [ "Get Snapshot", parseZseGetSnapshot ],
           7: [ "Start Sampling", parseZseStartSampling ],
           8: [ "Get Sampled Data", parseZseGetSampledData ],
+          9: [ "Mirror Report Attribute Response", getMirrorReportAttributeResponseDetails ],
           11: [ "Change Supply", parseZseChangeSupply ],
           13: [ "Set Supply Status", parseZseSetSupplyStatus ],
           14: [ "Set Uncontrolled Flow Threshold", parseZseSetUncontrolledFlowThreshold ],
@@ -970,6 +989,7 @@ function getZigbeeProfile(profileId) {
           0x0227: "Debt Recovery Amount 2",
           0x0231: "Debt Amount 3 (Payment-Based Debt)",
           0x0239: "Debt Recovery Top Up Percentage 3",
+          0x051C: "Current Day Cost Consumption Delivered",
         },
         commands: {
           0: [ "Select Available Emergency Credit", parseZseSelectAvailableEmergencyCredit ],
@@ -1177,6 +1197,12 @@ function getZigbeeProfile(profileId) {
           details.push([ "Attribute Data Type", 1, "Bitmap" + bits ]);
           details.push([ "Attribute Value", bytes ]);
           i += bytes;
+        } else if (type >= 0x20 && type <= 0x27) {  // Unsigned integer
+          var bytes = (type & 7) + 1;
+          var bits = bytes * 8;
+          details.push([ "Attribute Data Type", 1, "Uint" + bits ]);
+          details.push([ "Attribute Value", bytes ]);
+          i += bytes;
         } else if (type == 0xE2) {  // UTC Time
           var value = payload[i] | payload[i + 1] << 8 | payload[i + 2] << 16 | payload[i + 3] << 24;
           details.push([ "Attribute Data Type", 1, "UTC Time" ]);
@@ -1187,6 +1213,45 @@ function getZigbeeProfile(profileId) {
           details.push([ "TODO: Remaining Payload", payload.length - i ]);
           break;
         }
+      }
+    }
+  }
+
+  function getReportAttributesDetails(/*int*/ clusterId, /*Uint8Array*/ payload, details) {
+    var cluster = zse.clusters[clusterId];
+    for (var i = 0; i < payload.length; ) {
+      var attributeId = payload[i] | payload[i + 1] << 8;
+      i += 2;
+      var attributeName = cluster && cluster.attributes[attributeId];
+      details.push([ "Attribute Id", 2, attributeName ]);
+      var type = payload[i++];
+      if (type >= 0x30 && type <= 0x31) {  // Enumeration
+        var bytes = (type & 7) + 1;
+        var bits = bytes * 8;
+        details.push([ "Attribute Data Type", 1, "Enum" + bits ]);
+        details.push([ "Attribute Value", bytes ]);
+        i += bytes;
+      } else if (type >= 0x18 && type <= 0x1F) {  // Bitmap
+        var bytes = (type & 7) + 1;
+        var bits = bytes * 8;
+        details.push([ "Attribute Data Type", 1, "Bitmap" + bits ]);
+        details.push([ "Attribute Value", bytes ]);
+        i += bytes;
+      } else if (type >= 0x20 && type <= 0x27) {  // Unsigned integer
+        var bytes = (type & 7) + 1;
+        var bits = bytes * 8;
+        details.push([ "Attribute Data Type", 1, "Uint" + bits ]);
+        details.push([ "Attribute Value", bytes ]);
+        i += bytes;
+      } else if (type == 0xE2) {  // UTC Time
+        var value = payload[i] | payload[i + 1] << 8 | payload[i + 2] << 16 | payload[i + 3] << 24;
+        details.push([ "Attribute Data Type", 1, "UTC Time" ]);
+        details.push([ "Attribute Value", 4, toUtcTimeString(value) ]);
+        i += 4;
+      } else {
+        details.push([ "TODO: Attribute Data Type", 1 ]);
+        details.push([ "TODO: Remaining Payload", payload.length - i ]);
+        break;
       }
     }
   }
@@ -1287,6 +1352,64 @@ function getZigbeeProfile(profileId) {
     var name = (command && command[0]) || "";
     putBytes("Command Id", getBytes(x, 1), name);
     parseZclStatusCode(x);
+  }
+
+  // ZSE OTA Firmware Upgrade
+
+  function getQueryNextImageRequestDetails(/*int*/ clusterId, /*Uint8Array*/ payload, details) {
+    details.push([ "Field Control", 1 ],
+                 [ "Manufacturer Code", 2 ],
+                 [ "Image Type", 2 ],
+                 [ "Current File Version", 4 ]);
+    if (payload[0] & 1) {  // field control hardware version present bit
+      details.push([ "Hardware Version", 2 ]);
+    }
+  }
+
+  function getQueryNextImageResponseDetails(/*int*/ clusterId, /*Uint8Array*/ payload, details) {
+    details.push([ "Status", 1 ]);
+    if (payload[0] == 0) {  // status == SUCCESS
+      details.push([ "Manufacturer Code", 2 ],
+                   [ "Image Type", 2 ],
+                   [ "File Version", 4 ],
+                   [ "Image Size", 4, payload[9] | payload[10] << 8 | payload[11] << 16 | payload[12] << 24 ]);
+    }
+  }
+
+  function getImageBlockRequestDetails(/*int*/ clusterId, /*Uint8Array*/ payload, details) {
+    details.push([ "Field Control", 1 ],
+                 [ "Manufacturer Code", 2 ],
+                 [ "Image Type", 2 ],
+                 [ "File Version", 4 ],
+                 [ "File Offset", 4, payload[9] | payload[10] << 8 | payload[11] << 16 | payload[12] << 24 ],
+                 [ "Maximum Data Size", 1, payload[13] ]);
+  }
+
+  function getImageBlockResponseDetails(/*int*/ clusterId, /*Uint8Array*/ payload, details) {
+    details.push([ "Status", 1 ]);
+    if (payload[0] == 0) {  // status == SUCCESS
+      details.push([ "Manufacturer Code", 2 ],
+                   [ "Image Type", 2 ],
+                   [ "File Version", 4 ],
+                   [ "File Offset", 4, payload[9] | payload[10] << 8 | payload[11] << 16 | payload[12] << 24 ],
+                   [ "Data Size", 1, payload[13] ],
+                   [ "Image Data", payload[13] ]);
+    }
+  }
+
+  function getUpgradeEndRequestDetails(/*int*/ clusterId, /*Uint8Array*/ payload, details) {
+    details.push([ "Status", 1 ],
+                 [ "Manufacturer Code", 2 ],
+                 [ "Image Type", 2 ],
+                 [ "File Version", 4 ]);
+  }
+
+  function getUpgradeEndResponseDetails(/*int*/ clusterId, /*Uint8Array*/ payload, details) {
+    details.push([ "Manufacturer Code", 2 ],
+                 [ "Image Type", 2 ],
+                 [ "File Version", 4 ],
+                 [ "Current Time", 4 ],
+                 [ "Upgrade Time", 4 ]);
   }
 
   // ZSE Price Cluster
@@ -1419,6 +1542,13 @@ function getZigbeeProfile(profileId) {
     parseZclUtcTime(x, "Earliest Sample Time");
     parseZclEnum(8, x, "Sample Type");
     parseZclUint(16, x, "Number of Samples");
+  }
+
+  function getMirrorReportAttributeResponseDetails(/*int*/ clusterId, /*Uint8Array*/ payload, details) {
+    details.push([ "Notification Scheme", 1 ]);
+    for (var i = 1; i < payload.length; i += 4) {
+      details.push([ "Notification Flags #N", 4 ]);
+    }
   }
 
   function parseZseChangeSupply(x) {

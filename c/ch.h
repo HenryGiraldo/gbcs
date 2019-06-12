@@ -43,6 +43,7 @@ typedef struct {
     CH_GSME_TUNNEL_GET = 8,  /* received a GET tunnel data command */
     CH_GSME_TUNNEL_SENDING = 16,  /* currently sending data */
     CH_ZIGBEE_SENDING = 32,
+    CH_SEND_MIRROR_REPORT_ATTRIBUTE_RESPONSE = 64,
   } flags;
   unsigned char tunnelGetTransactionSequenceNumber;
   unsigned char tunnelFragmentNext;
@@ -63,6 +64,7 @@ typedef struct {
   /* Metering Client */
   unsigned char mirrorState;
   unsigned char mirrorSeqNum;
+  unsigned char mirrorEndpoint;
 
   /* Zigbee Smart Energy Tunneling Cluster (Server) */
   unsigned char tunnelState;
@@ -71,7 +73,7 @@ typedef struct {
 
   /* ZigBee Over-the-Air Upgrading Cluster */
   ZigbeeOtaServer ota;
-  char imageFile[64];
+  char imageFile[128];
 
 } ChDevice;
 

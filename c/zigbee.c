@@ -308,7 +308,6 @@ static void ZigbeeReceiveOtaUpgradeEndRequest(ZigbeeOtaServer *ota, const void *
     unsigned char status = p[3];
     if (status == ZIGBEE_SUCCESS) {
       ota->queryNextImageStatus = ZIGBEE_NO_IMAGE_AVAILABLE;
-      /* TODO: clear firwmware notification flag for GPF */
       /* TODO: update GUI */
     }
     ota->state = ZIGBEE_OTA_SEND_UPGRADE_END_RESPONSE;

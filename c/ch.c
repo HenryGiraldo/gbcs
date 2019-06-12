@@ -258,6 +258,36 @@ static int ChBuildTunnelingServerResponse(ChDevice *device, void *packet) {
   return n;
 }
 
+static void ChReceiveReportAttributes(ChDevice *device, int clusterId, const void *payload, int length) {
+  if (clusterId == ZIGBEE_METERING_CLUSTER_ID) {
+    const unsigned char *p = payload;
+    int i = 0;
+    while (i < length) {
+      int id = p[i] | p[i + 1] << 8;
+      int type = p[i + 2];
+      if (id == ZIGBEE_ATTRIBUTE_REPORTING_STATUS) {
+        if (type == ZIGBEE_ENUM8) {
+          int value = p[i + 3];
+          if (value == ZIGBEE_ATTRIBUTE_REPORTING_COMPLETE) {
+            device->flags |= CH_SEND_MIRROR_REPORT_ATTRIBUTE_RESPONSE;
+          }
+        }
+      }
+      int attributeDataLength;
+      if (type == ZIGBEE_UINT24) {
+        attributeDataLength = 3;
+      } else if (type == ZIGBEE_UINT48) {
+        attributeDataLength = 6;
+      } else if (type == ZIGBEE_ENUM8) {
+        attributeDataLength = 1;
+      } else {
+        break;
+      }
+      i += 3 + attributeDataLength;
+    }
+  }
+}
+
 /*
  * ZSE = Zigbee Smart Energy
  *
@@ -300,8 +330,9 @@ static int ChReceiveZseFrame(CommsHub *ch, ChDevice *device, int encryption, int
         device->sequenceNumber = seqnum;
         device->flags |= CH_READ_ATTRIBUTES;
       } else if (commandId == ZCL_REPORT_ATTRIBUTES) {
+        ChReceiveReportAttributes(device, clusterId, zclPayload, zclPayloadLength);
         device->sequenceNumber = seqnum;
-        device->flags |= CH_READ_ATTRIBUTES;
+        device->mirrorEndpoint = sourceEndpoint;
       }
     }
   }
@@ -366,17 +397,21 @@ static int ChBuildReadAttributesRecordTime(void *record, int attributeId) {
   }
 }
 
+static int ChGetFunctionalNotificationFlags(ChDevice *device) {
+  int flags = 0;
+  if (device->ota.queryNextImageStatus == ZIGBEE_SUCCESS) {
+    flags |= 1;  /* New OTA Firmware */
+  }
+  return flags;
+}
+
 /*
  * Builds a Read Attributes Status Record for the Metering cluster.
  * Reference: ZSE D.3.3.2 Attributes.
  */
 static int ChBuildReadAttributesRecordMetering(ChDevice *device, void *record, int attributeId) {
   if (attributeId == ZSE_FUNCTIONAL_NOTIFICATION_FLAGS) {
-    unsigned flags = 0;
-    if (device->ota.queryNextImageStatus == ZIGBEE_SUCCESS) {
-      flags |= 1;  /* New OTA Firmware */
-    }
-    return ZigbeeBuildAttributeRecordBitmap32(record, attributeId, flags);
+    return ZigbeeBuildAttributeRecordBitmap32(record, attributeId, ChGetFunctionalNotificationFlags(device));
   }
   return 0;
 }
@@ -447,6 +482,38 @@ static int ChBuildReadAttributesResponse(ChDevice *device, void *payload, Zigbee
   return n;
 }
 
+/*
+ * ZSE D.3.3.3.1.10 MirrorReportAttributeResponse Command
+ */
+static int ChBuildMirrorReportAttributeResponse(ChDevice *device, void *payload, ZigbeePacketInfo *info) {
+  info->destinationNode = device->shortAddress;
+  info->profileId = ZIGBEE_SMART_ENERGY_PROFILE_ID;
+  info->clusterId = ZIGBEE_METERING_CLUSTER_ID;
+  info->sourceEndpoint = CH_ZSE_ENDPOINT;
+  info->destinationEndpoint = device->mirrorEndpoint;
+  info->encryption = 1;
+  info->fragmentation = 0;
+
+  unsigned char *p = payload;
+  int n = 0;
+  p[n++] = 0x01;  /* frame control (client to server | cluster specific) */
+  p[n++] = device->sequenceNumber;
+  p[n++] = ZSE_MIRROR_REPORT_ATTRIBUTE_RESPONSE;  /* command id */
+  p[n++] = 2;  /* notification scheme */
+  int flags = ChGetFunctionalNotificationFlags(device);
+  p[n++] = flags;
+  p[n++] = flags >> 8;
+  p[n++] = flags >> 16;
+  p[n++] = flags >> 24;
+  /* NotificationFlags2 to 5 */
+  for (int i = 2; i <= 5; i++) {
+    for (int j = 0; j < 4; j++) {
+      p[n++] = 0;
+    }
+  }
+  return n;
+}
+
 int ChGetZigbeePacketToSend(CommsHub *ch, void *packet, ZigbeePacketInfo *info) {
   int bytes = 0;
   ChDevice *gsme = &ch->devices[0];  /* TODO */
@@ -494,6 +561,9 @@ int ChGetZigbeePacketToSend(CommsHub *ch, void *packet, ZigbeePacketInfo *info) 
   } else if (gsme->flags & CH_READ_ATTRIBUTES) {
     gsme->flags &= ~CH_READ_ATTRIBUTES;
     bytes = ChBuildReadAttributesResponse(gsme, packet, info);
+  } else if (gsme->flags & CH_SEND_MIRROR_REPORT_ATTRIBUTE_RESPONSE) {
+    gsme->flags &= ~CH_SEND_MIRROR_REPORT_ATTRIBUTE_RESPONSE;
+    bytes = ChBuildMirrorReportAttributeResponse(gsme, packet, info);
   } else if (gsme->flags & CH_MATCH_DESC) {
     char *p = packet;
     p[0] = gsme->sequenceNumber;

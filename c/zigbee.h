@@ -52,6 +52,8 @@ typedef enum {
 enum {
   ZIGBEE_BITMAP8 = 0x18,
   ZIGBEE_BITMAP32 = 0x1B,
+  ZIGBEE_UINT24 = 0x22,
+  ZIGBEE_UINT48 = 0x25,
   ZIGBEE_ENUM8 = 0x30,
   ZIGBEE_ENUM16 = 0x31,
   ZIGBEE_UTCTIME = 0xE2,
@@ -67,6 +69,12 @@ enum {
   ZIGBEE_WAIT_FOR_DATA = 0x97,
   ZIGBEE_NO_IMAGE_AVAILABLE = 0x98,
 };
+
+/* ZSE A.2 New Attribute Reporting Status Indication */
+enum { ZIGBEE_ATTRIBUTE_REPORTING_STATUS = 0xFFFE };
+
+/* ZSE A.2.1 Attribute Reporting Status Attribute */
+enum { ZIGBEE_ATTRIBUTE_REPORTING_COMPLETE = 1 };
 
 void ZigbeeDerivePreconfiguredKey(void *preconfiguredKey, const void *installCode);
 
@@ -128,6 +136,10 @@ typedef enum {
 typedef enum {
   ZSE_FUNCTIONAL_NOTIFICATION_FLAGS = 0x0000,  /* 32-bit bitmap */
 } ZseMeteringAttributeId;
+
+typedef enum {
+  ZSE_MIRROR_REPORT_ATTRIBUTE_RESPONSE = 0x09,
+} ZseMeteringClientCommandId;
 
 /*
  * ZSE Price Cluster
