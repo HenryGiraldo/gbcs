@@ -7,7 +7,7 @@ Smart Metering Implementation Programme.
 ## Contents
 
 * c: implementations of GBCS devices in C language.
-* python: Python functions to generate and verify GBCS messagaes.
+* python: Python functions to generate and verify GBCS messages.
 
 ## License
 

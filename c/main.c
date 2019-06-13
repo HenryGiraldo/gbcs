@@ -728,21 +728,22 @@ static void SendGbcsMessageToGfi(const void *message, int length) {
   }
 }
 
-static void ZigbeeFrameReceived(int profileId, int clusterId, int sourceEndpoint, int destinationEndpoint, const void *payload, int length) {
+static void ZigbeeFrameReceived(int profileId, int clusterId, int sourceEndpoint, int destinationEndpoint, const void *payload, int length, int rssi) {
   int i;
   char a[256];
 
   a[0] = WS_ZIGBEE_RX;
-  a[1] = profileId;
-  a[2] = profileId >> 8;
-  a[3] = clusterId;
-  a[4] = clusterId >> 8;
-  a[5] = sourceEndpoint;
-  a[6] = destinationEndpoint;
+  a[1] = rssi;
+  a[2] = profileId;
+  a[3] = profileId >> 8;
+  a[4] = clusterId;
+  a[5] = clusterId >> 8;
+  a[6] = sourceEndpoint;
+  a[7] = destinationEndpoint;
   for (i = 0; i < length; i++) {
-    a[7 + i] = ((char *)payload)[i];
+    a[8 + i] = ((char *)payload)[i];
   }
-  SendToAllWebsockets(a, 7 + length);
+  SendToAllWebsockets(a, 8 + length);
 }
 
 static void ZigbeeFrameSent(int profileId, int clusterId, int sourceEndpoint, int destinationEndpoint, const void *payload, int length) {
@@ -880,7 +881,7 @@ static void ReadEzspIncomingMessageHandler(MainData *data, Ezsp *ezsp, int lengt
     if (messageContents) {
       int profileId = apsFrame->profileId[0] | apsFrame->profileId[1] << 8;
       int clusterId = apsFrame->clusterId[0] | apsFrame->clusterId[1] << 8;
-      ZigbeeFrameReceived(profileId, clusterId, apsFrame->sourceEndpoint, apsFrame->destinationEndpoint, messageContents, messageLength);
+      ZigbeeFrameReceived(profileId, clusterId, apsFrame->sourceEndpoint, apsFrame->destinationEndpoint, messageContents, messageLength, response->lastHopRssi);
       int encryption = apsFrame->options[0] & EZSP_APS_OPTION_ENCRYPTION;
       unsigned char gbcsMsg[1200];
       int gbcsMsgLen = ChReceiveZigbeeApsFrame(ch, device, encryption, profileId, clusterId, apsFrame->sourceEndpoint, apsFrame->destinationEndpoint, messageContents, messageLength, gbcsMsg);

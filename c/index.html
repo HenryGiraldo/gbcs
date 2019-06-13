@@ -36,6 +36,8 @@ p#errors { background: #f00; border: 1px solid #ff8; color: #ff8; font-weight: b
 #log li.gbcs:hover { background: #f0f8ff; }
 #log li.receive:hover { background: #f0f8ff; }
 #log li.transmit:hover { background: #f0f8ff; }
+#rssi { list-style: none; margin: 0 auto 0 0; padding: 0; }
+#rssi span { background: #def; border: 1px solid #009ee2; display: inline-block; margin-top: -1px; padding: 0 1ex; text-align: right; }
 #modal {
   background: rgb(0, 0, 0, 0.6);
   height: 100%;
@@ -76,6 +78,7 @@ p#errors { background: #f00; border: 1px solid #ff8; color: #ff8; font-weight: b
 <option>Settings</option>
 <option>Devices</option>
 <option>Scan</option>
+<option>RSSI</option>
 <option>Zigbee</option>
 </select>
 <div id=content></div>
@@ -147,6 +150,8 @@ function showContent(/*string*/ name) {
     showFirmwareUpgrade();
   } else if (name == "Scan") {
     showScan();
+  } else if (name == "RSSI") {
+    showRssi();
   } else if (name == "Zigbee") {
     showZigbee();
   } else {
@@ -420,6 +425,55 @@ function parseScan(/*Uint8Array */ a) {
   updateScan();
 }
 
+// RSSI
+
+function showRssi() {
+  var h = document.getElementById("header");
+  while (h.childNodes.length > 2) {
+    h.removeChild(h.lastChild);
+  }
+  document.getElementById("content").innerHTML = "<h2>RSSI " + helpButton("RSSI") + "</h2><ul id=rssi></ul>";
+}
+
+function addRssi(rssi) {
+  var ul = document.getElementById("rssi");
+  if (ul) {
+    var d = new Date;
+    var h = d.getUTCHours();
+    if (h < 10) {
+      h = "0" + h;
+    }
+    var m = d.getUTCMinutes();
+    if (m < 10) {
+      m = "0" + m;
+    }
+    var s = d.getUTCSeconds();
+    if (s < 10) {
+      s = "0" + s;
+    }
+    var t = h + ":" + m + ":" + s;
+
+    var maxrssi = 0;
+    var minrssi = -100;
+    var minpercent = 3;
+    var maxpercent = 90;
+    var percent = minpercent + Math.floor((rssi - minrssi) * (maxpercent - minpercent) / (maxrssi - minrssi));
+    if (percent < minpercent) {
+      percent = minpercent;
+    } else if (percent > maxpercent) {
+      percent = maxpercent;
+    }
+
+    var li = document.createElement("li");
+    li.innerHTML = t + " <span style=width:" + percent + "%>" + rssi + "</span>";
+
+    if (ul.childElementCount > 100) {
+      ul.removeChild(ul.lastChild);
+    }
+    ul.insertBefore(li, ul.firstChild);
+  }
+}
+
 // Zigbee
 
 function showZigbee() {
@@ -606,23 +660,31 @@ function receiveLogMessage(/*Uint8Array*/ a) {
 }
 
 function receiveZigbeeFrame(/*Uint8Array*/ a) {
+  var frame;
   var className;
-  if (a[0] == 128) {
-    className = "receive";
-  } else {
+  if (a[0] == 129) {
     className = "transmit";
+    frame = a.subarray(1);
+  } else {
+    className = "receive";
+    frame = a.subarray(2);
+    var rssi = a[1];
+    if (rssi > 0x7F) {
+      rssi -= 0x100;
+    }
+    addRssi(rssi);
   }
-  addLogMessage(getZigbeeFrameSummary(a), className, function() {
+  addLogMessage(getZigbeeFrameSummary(frame), className, function() {
     var html = "<table><tr><th>Field<th>Bytes<th>Description";
-    var details = getZigbeeFrameDetails(a);
-    var index = 1;
+    var details = getZigbeeFrameDetails(frame);
     var h = "0123456789ABCDEF";
+    var index = 0;
     for (var i = 0; i < details.length; i++) {
       var fieldName = details[i][0];
       html += "<tr><td>" + fieldName + "<td>";
       var length = details[i][1];
       for (var k = 0; k < length; k++) {
-        var x = a[index++];
+        var x = frame[index++];
         html += " " + h.charAt((x >> 4) & 15) + h.charAt(x & 15);
       }
       html += "<td>";
@@ -656,9 +718,9 @@ function toHexString(uint8array, index, length) {
 // Zigbee parser
 
 function getZigbeeFrameSummary(/*Uint8Array*/ a) {
-  var profileId = a[1] | a[2] << 8;
-  var clusterId = a[3] | a[4] << 8;
-  var payload = a.subarray(7);
+  var profileId = a[0] | a[1] << 8;
+  var clusterId = a[2] | a[3] << 8;
+  var payload = a.subarray(6);
   var profile = getZigbeeProfile(profileId);
   if (profile) {
     return profile.getFrameSummary(clusterId, payload);
@@ -668,9 +730,9 @@ function getZigbeeFrameSummary(/*Uint8Array*/ a) {
 }
 
 function getZigbeeFrameDetails(/*Uint8Array*/ a) {
-  var profileId = a[1] | a[2] << 8;
-  var clusterId = a[3] | a[4] << 8;
-  var payload = a.subarray(7);
+  var profileId = a[0] | a[1] << 8;
+  var clusterId = a[2] | a[3] << 8;
+  var payload = a.subarray(6);
   var details = [
     [ "Profile Id", 2, getProfileName(profileId) ],
     [ "Cluster Id", 2, getClusterName(profileId, clusterId) ],
@@ -2296,11 +2358,15 @@ function showHelp(/*string*/ id) {
 
     // Firmware Upgrade
 
-    "Query Next Image Status": "The status value to send in the Query Next Image Response message to the meter as a response to a Query Next Image Request message sent by the meter. The allowed values are:<ul><li>SUCCESS: the meter may start retrieving the firmware image blocks,<li>NO_IMAGE_AVAILABLE: there is no new firmware image for the meter to retrieve,<li>NOT_AUTHORIZED: not authorized to send firmware images to the meter.</ul><p>Reference: ZigBee OTA Upgrading Cluster, section 6.10.5 Query Next Image Response Command.",
+    "Query Next Image Status": "The status value to send in the Query Next Image Response message to the meter as a response to a Query Next Image Request message sent by the meter. The allowed values are:<ul><li>SUCCESS: the meter may start retrieving the firmware image blocks (this value will also set the New OTA Firmware bit of the Functional Notification Flags),<li>NO_IMAGE_AVAILABLE: there is no new firmware image for the meter to retrieve,<li>NOT_AUTHORIZED: not authorized to send firmware images to the meter.</ul><p>Reference: ZigBee OTA Upgrading Cluster section 6.10.5 Query Next Image Response Command, ZSE section D.3.3.2.1.1 Functional Notification Flags.",
 
     "Image Block Status": "The status value to send in the Image Block Response message to the meter as a response to a Image Block Request message sent by the meter. The allowed values are:<ul><li>SUCCESS: the Image Block Response message contains the requested image block data,<li>ABORT: cancel the download process; the meter should reinitiate the process, by sending a Query Next Image Request message.</ul><p>References:<ul><li>ZigBee OTA Upgrading Cluster, section 6.10.8 Image Block Response Command,<li>GBCS section 11.2.1 Transport of firmware images.</ul>",
 
     "Image File": "The name of the firmware image file. It should be in the following format: MMMM-TTTT-VVVVVVVV-III.zigbee<ul><li>MMMM: Manufacturer Code (4 uppercase hexadecimal characters),<li>TTTT: Image Type (4 uppercase hexadecimal characters),<li>VVVVVVVV: File Version (8 uppercase hexadecimal characters),<li>III: Optional Information (any number of ASCII characters)</ul><p>Reference: ZigBee OTA Upgrading Cluster, section 6.3.8 OTA File Naming.",
+
+    // RSSI
+
+    "RSSI": "This page shows the Received Signal Strength Indicator (RSSI) values in dBm of the ZigBee frames received, measured at the input of the transciever of this Communications Hub. Reference: ZigBee D.9.2.1.1 Rssi Parameter.",
 
     // Zigbee
 
